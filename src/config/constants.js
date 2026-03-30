@@ -190,6 +190,140 @@ export const FILE_PLANS = {
   ],
 };
 
+const COMMON_FORBIDDEN_PATTERNS = [
+  { pattern: /\bphp\b/i, label: "PHP" },
+  { pattern: /\blaravel\b/i, label: "Laravel" },
+];
+
+export const PROJECT_TYPE_CONTRACTS = {
+  nextjs: {
+    runtime: "nextjs",
+    stack: ["Next.js", "TypeScript", "App Router"],
+    allowedExtensions: [".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".md", ".example"],
+    forbiddenPatterns: [
+      ...COMMON_FORBIDDEN_PATTERNS,
+      { pattern: /<\?php/i, label: "PHP tags" },
+      { pattern: /app\.get\(|express\(/i, label: "Express server" },
+      { pattern: /<!doctype html>/i, label: "Standalone HTML document" },
+    ],
+    requiredPaths: ["package.json", "src/app/layout.tsx", "src/app/page.tsx"],
+    plannerRules: [
+      "Use Next.js App Router structure only.",
+      "Do not create standalone server runtimes or PHP files.",
+      "All pages and layouts must share the same design system and shell.",
+    ],
+    docsRules: [
+      "Document only the generated Next.js app structure and commands.",
+      "Do not mention APIs, pages, or services that do not exist in the final file tree.",
+    ],
+  },
+  "react-node": {
+    runtime: "react-node",
+    stack: ["React", "Vite", "Node.js", "Express"],
+    allowedExtensions: [".ts", ".tsx", ".js", ".json", ".css", ".md", ".yml"],
+    forbiddenPatterns: [
+      ...COMMON_FORBIDDEN_PATTERNS,
+      { pattern: /next\/|next\.config/i, label: "Next.js" },
+      { pattern: /<!doctype html>[\s\S]*<body/i, label: "Standalone multi-page site" },
+    ],
+    requiredPaths: ["client/src/main.tsx", "client/src/App.tsx", "server/src/server.ts"],
+    plannerRules: [
+      "Client code must stay under client/, server code under server/.",
+      "Do not use Next.js, PHP, or standalone website page structure.",
+      "The client must use a shared layout/design system across pages.",
+    ],
+    docsRules: [
+      "Document the client/server split and only generated scripts/endpoints.",
+    ],
+  },
+  api: {
+    runtime: "api",
+    stack: ["Node.js", "Express", "REST API"],
+    allowedExtensions: [".ts", ".js", ".json", ".md", ".example"],
+    forbiddenPatterns: [
+      ...COMMON_FORBIDDEN_PATTERNS,
+      { pattern: /<html|<!doctype html>/i, label: "HTML pages" },
+      { pattern: /react|next\/|useState|useEffect/i, label: "Frontend framework code" },
+      { pattern: /\.css\b/i, label: "CSS references" },
+    ],
+    requiredPaths: ["package.json", "src/server.ts", "src/app.ts"],
+    plannerRules: [
+      "Generate backend/API files only.",
+      "Do not create frontend pages, CSS, React, or Next.js files.",
+      "Focus on routes, middleware, services, validation, and docs.",
+    ],
+    docsRules: [
+      "README must describe API setup, routes, env vars, and test/run commands only.",
+    ],
+  },
+  saas: {
+    runtime: "saas",
+    stack: ["Next.js", "TypeScript", "Auth", "Billing"],
+    allowedExtensions: [".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".md", ".example"],
+    forbiddenPatterns: [
+      ...COMMON_FORBIDDEN_PATTERNS,
+      { pattern: /express\(|app\.get\(/i, label: "Standalone Express server" },
+      { pattern: /<!doctype html>/i, label: "Standalone HTML website" },
+    ],
+    requiredPaths: ["package.json", "src/app/layout.tsx", "src/app/(marketing)/page.tsx"],
+    plannerRules: [
+      "Use a unified Next.js SaaS architecture with marketing and dashboard surfaces.",
+      "Do not create PHP, plain multi-page HTML, or separate backend frameworks.",
+      "Marketing and dashboard must share the same design language and tokens.",
+    ],
+    docsRules: [
+      "README must describe generated SaaS flows, auth/billing setup, and real routes only.",
+    ],
+  },
+  website: {
+    runtime: "website",
+    stack: ["HTML5", "CSS3", "JavaScript"],
+    allowedExtensions: [".html", ".css", ".js", ".json", ".md", ".svg", ".png", ".jpg", ".jpeg", ".webp"],
+    forbiddenPatterns: [
+      ...COMMON_FORBIDDEN_PATTERNS,
+      { pattern: /\breact\b|jsx|tsx|useState|useEffect/i, label: "React" },
+      { pattern: /next\/|next\.config|getServerSideProps/i, label: "Next.js" },
+      { pattern: /\bexpress\b|app\.listen\(|router\./i, label: "Node backend" },
+      { pattern: /\bsequelize\b|\bprisma\b|\bsqlite\b|\bpostgres\b/i, label: "Database/backend stack" },
+    ],
+    requiredPaths: ["index.html", "css/style.css", "js/main.js"],
+    requiredSharedAssets: ["css/variables.css", "css/style.css", "css/responsive.css", "js/main.js"],
+    plannerRules: [
+      "Generate a pure static website using HTML, CSS, and JavaScript only.",
+      "Do not create React, Next.js, Node.js, API routes, PHP, or database files.",
+      "All pages must use the same shared CSS files, typography, spacing, header/footer pattern, and animation system.",
+    ],
+    docsRules: [
+      "README must describe a static website only.",
+      "Do not mention npm, build steps, backend services, or frameworks unless matching files actually exist.",
+    ],
+  },
+  pwa: {
+    runtime: "pwa",
+    stack: ["React", "Vite", "PWA"],
+    allowedExtensions: [".ts", ".tsx", ".js", ".json", ".css", ".md"],
+    forbiddenPatterns: [
+      ...COMMON_FORBIDDEN_PATTERNS,
+      { pattern: /next\/|next\.config/i, label: "Next.js" },
+      { pattern: /<\?php|php/i, label: "PHP" },
+      { pattern: /app\.get\(|express\(/i, label: "Express server" },
+    ],
+    requiredPaths: ["package.json", "src/main.tsx", "src/App.tsx", "public/manifest.json", "public/sw.js"],
+    plannerRules: [
+      "Use React/Vite app structure with PWA assets and offline support.",
+      "Do not generate PHP, Next.js, or separate backend frameworks.",
+      "UI pages/components must share one design system and navigation pattern.",
+    ],
+    docsRules: [
+      "README must reflect the actual manifest, service worker, and generated app structure.",
+    ],
+  },
+};
+
+export function getProjectContract(appType) {
+  return PROJECT_TYPE_CONTRACTS[appType] || PROJECT_TYPE_CONTRACTS.website;
+}
+
 /* ── Role Colors for file tree ── */
 export const ROLE_COLORS = {
   deps: "#f59e0b",

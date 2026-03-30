@@ -54,6 +54,7 @@ const initialState = {
   // Generation
   loading: false,
   dynamicPlan: savedState?.dynamicPlan || null,
+  projectBlueprint: savedState?.projectBlueprint || null,
   files: savedState?.files || {},
   fileStatuses: savedState?.fileStatuses || {},
   fileReviews: savedState?.fileReviews || {},
@@ -157,6 +158,7 @@ function forgeReducer(state, action) {
         ...state,
         loading: true,
         dynamicPlan: null,
+        projectBlueprint: null,
         files: {},
         fileStatuses: {},
         fileReviews: {},
@@ -175,7 +177,8 @@ function forgeReducer(state, action) {
     case Actions.PLANNING_DONE:
       return {
         ...state,
-        dynamicPlan: action.payload,
+        dynamicPlan: action.payload.files,
+        projectBlueprint: action.payload.blueprint,
       };
 
     case Actions.PLANNING_ERROR:
@@ -212,7 +215,10 @@ function forgeReducer(state, action) {
         ...state,
         files: { ...state.files, [action.payload.path]: action.payload.content },
         fileStatuses: { ...state.fileStatuses, [action.payload.path]: "done" },
-        metrics: { ...state.metrics, files: state.metrics.files + 1 },
+        metrics: {
+          ...state.metrics,
+          files: state.files[action.payload.path] ? state.metrics.files : state.metrics.files + 1,
+        },
       };
 
     case Actions.FILE_ERROR:
@@ -353,6 +359,7 @@ function forgeReducer(state, action) {
         prompt: p.savedState?.prompt ?? "",
         features: p.savedState?.features ?? ["Authentication", "RTL Arabic"],
         dynamicPlan: p.savedState?.dynamicPlan ?? null,
+        projectBlueprint: p.savedState?.projectBlueprint ?? null,
         files: p.savedState?.files ?? {},
         fileStatuses: p.savedState?.fileStatuses ?? {},
         fileReviews: p.savedState?.fileReviews ?? {},
@@ -388,6 +395,7 @@ function forgeReducer(state, action) {
         // Reset generation
         loading: false,
         dynamicPlan: null,
+        projectBlueprint: null,
         files: {},
         fileStatuses: {},
         fileReviews: {},
@@ -441,6 +449,7 @@ export function ForgeProvider({ children }) {
           features: state.features,
           prompt: state.prompt,
           dynamicPlan: state.dynamicPlan,
+          projectBlueprint: state.projectBlueprint,
           files: state.files,
           fileStatuses: state.fileStatuses,
           fileReviews: state.fileReviews,
@@ -467,7 +476,7 @@ export function ForgeProvider({ children }) {
   }, [
     state.projectId, state.provider, state.geminiApiKey, state.openRouterApiKey,
     state.model, state.projName, state.appType, state.features,
-    state.prompt, state.dynamicPlan, state.files, state.fileStatuses,
+    state.prompt, state.dynamicPlan, state.projectBlueprint, state.files, state.fileStatuses,
     state.fileReviews, state.selectedFile, state.progress, state.phase,
     state.steps, state.metrics, state.mobileTab, state.codeView
   ]);

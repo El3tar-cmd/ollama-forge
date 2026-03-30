@@ -4,7 +4,8 @@ import { useForge } from "../../context/useForge.js";
 
 export default function FileStatusGrid() {
   const { state, dispatch, Actions, plan } = useForge();
-  const { files, fileStatuses } = state;
+  const { files, fileStatuses, dynamicPlan } = state;
+  const currentPlan = dynamicPlan || plan;
 
   function handleDotClick(path) {
     if (!files[path]) return;
@@ -22,7 +23,7 @@ export default function FileStatusGrid() {
         حالة الملفات
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-        {plan.map(f => {
+        {currentPlan.map(f => {
           const s = fileStatuses[f.path] || "pending";
           const col = s === "done" ? "var(--g)"
             : s === "gen" ? "var(--c)"

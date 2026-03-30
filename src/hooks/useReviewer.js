@@ -3,6 +3,7 @@ import { useForge } from "../context/useForge.js";
 import { chatCompletion } from "../services/providerRouter.js";
 import { REVIEWER_SYSTEM_MESSAGE } from "../config/prompts.js";
 import { getApiKey } from "../utils/apiKey.js";
+import { getProjectContract } from "../config/constants.js";
 
 /**
  * useReviewer encapsulates the logic for Stage 1: Static Relational Healer.
@@ -11,7 +12,7 @@ import { getApiKey } from "../utils/apiKey.js";
 export function useReviewer() {
   const { state } = useForge();
 
-  const runStaticReview = useCallback(async (path, content, existingPlan) => {
+  const runStaticReview = useCallback(async (path, content, existingPlan, blueprint) => {
     // We only review logic and UI files where imports matter most
     if (!path.endsWith(".ts") && !path.endsWith(".tsx") && !path.endsWith(".js") && !path.endsWith(".jsx")) {
       return { isValid: true, missingFiles: [] };
@@ -19,6 +20,7 @@ export function useReviewer() {
 
     // Build the list of currently known paths
     const currentPaths = existingPlan.map(f => f.path).join("\\n- ");
+    const contract = getProjectContract(blueprint?.projectType || state.appType);
 
     const promptText = `هذا هو كود الملف: \`${path}\`
 \`\`\`
@@ -28,7 +30,14 @@ ${content}
 وهذه هي خطة الملفات المتوفرة في المشروع حالياً:
 - ${currentPaths}
 
+وهذا هو عقد النوع الإجباري:
+- النوع: ${blueprint?.projectType || state.appType}
+- الـ Stack الرسمي: ${(contract.stack || []).join(", ")}
+- الممنوعات: ${(contract.forbiddenPatterns || []).map((item) => item.label).join(", ")}
+- قواعد البناء: ${(contract.plannerRules || []).join(" | ")}
+
 ابحث في الكود عن أي استدعاء (import) لملفات داخلية (Relative paths) غير متوفرة في الخطة.
+وممنوع اقتراح أي ملف أو تقنية تكسر هذا العقد.
 إذا كان هناك ملفات ناقصة، اكتب الكود الخاص بها بالكامل وأرجعها في مصفوفة missingFiles بصيغة JSON.
 إذا كان كل شيء سليم، أرجع {"isValid": true, "missingFiles": []}.
 `;

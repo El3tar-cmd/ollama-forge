@@ -5,12 +5,15 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useForge } from "../context/useForge.js";
 import { buildFilePrompt, SYSTEM_MESSAGE } from "../config/prompts.js";
+import { getProjectContract } from "../config/constants.js";
 import { usePlanner } from "./usePlanner.js";
 import { useReviewer } from "./useReviewer.js";
 import { useHealer } from "./useHealer.js";
 import { chatStream } from "../services/providerRouter.js";
 import { analyzeCodeQuality } from "../utils/codeAnalyzer.js";
 import { getApiKey } from "../utils/apiKey.js";
+import { validateGeneratedFile, validateProjectConsistency } from "../utils/projectConsistency.js";
+import { generateProjectReadme } from "../utils/readmeGenerator.js";
 
 /**
  * Orchestrates multi-file generation with streaming.
@@ -36,6 +39,11 @@ export function useGeneration() {
   useEffect(() => {
     filesRef.current = state.files;
   }, [state.files]);
+
+  const blueprintRef = useRef(state.projectBlueprint);
+  useEffect(() => {
+    blueprintRef.current = state.projectBlueprint;
+  }, [state.projectBlueprint]);
 
   const resolveImportCandidates = useCallback((filePath, importPath) => {
     const basePath = importPath.startsWith("@/")
@@ -67,12 +75,16 @@ export function useGeneration() {
    * Streams a single file from the Ollama API.
    */
   const generateFile = useCallback(async (fileInfo, signal) => {
+    const blueprint = blueprintRef.current;
+    const contract = getProjectContract(blueprint?.projectType || state.appType);
     const fp = buildFilePrompt(
       fileInfo,
       selectedAppType?.label || state.appType,
       state.prompt,
       state.features,
-      state.projName
+      state.projName,
+      blueprint,
+      contract
     );
 
     const onToken = (tok) => {
@@ -104,16 +116,19 @@ export function useGeneration() {
     if (!state.prompt.trim() || !state.model || !state.connected || state.loading) return;
 
     // 1. Planning Phase (AI determines files)
-    const dynamicPlan = await runPlanner();
+    const blueprint = await runPlanner();
     
     // If planning failed or aborted, stop early
-    if (!dynamicPlan || !Array.isArray(dynamicPlan)) return;
+    if (!blueprint || !Array.isArray(blueprint.files)) return;
 
-    const plannedPaths = new Set(dynamicPlan.map((file) => file.path));
-    const generationQueue = [...dynamicPlan];
+    let currentBlueprint = blueprint;
+    let currentPlan = blueprint.files;
+
+    const plannedPaths = new Set(currentPlan.map((file) => file.path));
+    const generationQueue = [...currentPlan];
 
     // 2. Generation Phase
-    dispatch({ type: Actions.START_GENERATION, payload: dynamicPlan });
+    dispatch({ type: Actions.START_GENERATION, payload: currentPlan });
     tokRef.current = 0;
     startRef.current = Date.now();
 
@@ -127,7 +142,7 @@ export function useGeneration() {
     abortRef.current = new AbortController();
     const { signal } = abortRef.current;
 
-    addStep("info", `تأكيد هندسة ${selectedAppType?.label}`, `${dynamicPlan.length} ملفات · ${state.projName}`);
+    addStep("info", `تأكيد هندسة ${selectedAppType?.label}`, `${currentPlan.length} ملفات · ${state.projName}`);
 
     let fileIdx = 0;
     for (const fileInfo of generationQueue) {
@@ -135,7 +150,7 @@ export function useGeneration() {
 
       dispatch({ type: Actions.FILE_GENERATING, payload: fileInfo });
 
-      const prog = Math.round((fileIdx / dynamicPlan.length) * 90);
+      const prog = Math.round((fileIdx / currentPlan.length) * 90);
       dispatch({ type: Actions.SET_PROGRESS, payload: prog });
 
       addStep("build", `يبني ${fileInfo.path}`, fileInfo.desc);
@@ -146,7 +161,10 @@ export function useGeneration() {
         filesRef.current = { ...filesRef.current, [fileInfo.path]: content };
         
         // --- Run Code Review Analysis ---
-        const review = analyzeCodeQuality(content, fileInfo.path);
+        const review = [
+          ...analyzeCodeQuality(content, fileInfo.path),
+          ...validateGeneratedFile(fileInfo.path, content, currentBlueprint),
+        ];
         dispatch({ type: Actions.SET_FILE_REVIEW, payload: { path: fileInfo.path, review } });
         
         
@@ -159,10 +177,10 @@ export function useGeneration() {
 
         // --- Phase 10 Stage 1: Static Relational Healing ---
         addStep("info", `المدقق الذكي`, `يبحث عن تبعيات ${fileInfo.path} المفقودة`);
-        const { missingFiles } = await runStaticReview(fileInfo.path, content, dynamicPlan);
+        const { missingFiles } = await runStaticReview(fileInfo.path, content, currentPlan, currentBlueprint);
         
         if (missingFiles && missingFiles.length > 0) {
-          let nextPlan = dynamicPlan;
+          let nextPlan = currentPlan;
           for (const mFile of missingFiles) {
             if (!plannedPaths.has(mFile.path) && !filesRef.current[mFile.path] && mFile.code) {
               plannedPaths.add(mFile.path);
@@ -172,8 +190,10 @@ export function useGeneration() {
               addStep("build", `✨ إصلاح ذاتي`, `تم توليد ملف ناقص: ${mFile.path}`);
             }
           }
-          if (nextPlan !== dynamicPlan) {
-            dispatch({ type: Actions.PLANNING_DONE, payload: nextPlan });
+          if (nextPlan !== currentPlan) {
+            currentPlan = nextPlan;
+            currentBlueprint = { ...currentBlueprint, files: nextPlan };
+            dispatch({ type: Actions.PLANNING_DONE, payload: { files: currentPlan, blueprint: currentBlueprint } });
           }
         }
         
@@ -200,6 +220,9 @@ export function useGeneration() {
         const errors = [];
         const allPaths = Object.keys(files);
 
+        const consistencyErrors = validateProjectConsistency(files, currentBlueprint);
+        errors.push(...consistencyErrors);
+
         for (const [filePath, content] of Object.entries(files)) {
           if (!content) continue;
           // Extract all relative imports: import X from '@/...' or './...'
@@ -224,11 +247,35 @@ export function useGeneration() {
       // Use filesRef.current to get the LATEST files (not a stale closure snapshot)
       // Then also merge any newly added files from the dynamic plan
       const latestFiles = { ...filesRef.current };
-      for (const f of dynamicPlan) {
+      for (const f of currentPlan) {
         if (filesRef.current[f.path]) latestFiles[f.path] = filesRef.current[f.path];
       }
 
-      await runHealingLoop(latestFiles, compileCheck);
+      if (currentPlan.some((file) => file.path === "README.md")) {
+        latestFiles["README.md"] = generateProjectReadme({
+          projectName: state.projName,
+          prompt: state.prompt,
+          features: state.features,
+          blueprint: currentBlueprint,
+          files: latestFiles,
+        });
+        dispatch({ type: Actions.FILE_DONE, payload: { path: "README.md", content: latestFiles["README.md"] } });
+        addStep("done", "📖 README مشتق", "تم توليد التوثيق من الملفات الفعلية");
+      }
+
+      const healedFiles = await runHealingLoop(latestFiles, compileCheck);
+
+      if (currentPlan.some((file) => file.path === "README.md")) {
+        const finalReadme = generateProjectReadme({
+          projectName: state.projName,
+          prompt: state.prompt,
+          features: state.features,
+          blueprint: currentBlueprint,
+          files: healedFiles,
+        });
+        dispatch({ type: Actions.FILE_DONE, payload: { path: "README.md", content: finalReadme } });
+        addStep("done", "📖 README نهائي", "تمت مزامنة التوثيق مع الناتج النهائي");
+      }
     }
   }, [
     state, dispatch, Actions, selectedAppType,
@@ -291,7 +338,16 @@ export function useGeneration() {
           dispatch({ type: Actions.FILE_DONE, payload: { path: fileInfo.path, content } });
           filesRef.current = { ...filesRef.current, [fileInfo.path]: content };
 
-          const review = analyzeCodeQuality(content, fileInfo.path);
+          const review = [
+            ...analyzeCodeQuality(content, fileInfo.path),
+            ...validateGeneratedFile(fileInfo.path, content, state.projectBlueprint || {
+              projectType: state.appType,
+              designSystem: {},
+              pages: [],
+              sharedModules: [],
+              files: plan,
+            }),
+          ];
           dispatch({ type: Actions.SET_FILE_REVIEW, payload: { path: fileInfo.path, review } });
           addStep("done", `\u2713 ${fileInfo.path}`, `تم الاسترداد (محاولة ${attempt})`);
           success = true;
